@@ -20,15 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 
-def notify(msg, title="Script"):
-    requests.post(f"https://ntfy.sh/{title}",
+def notify(msg, topic="test1", title="MinKNOW Notification"):
+    requests.post(f"https://ntfy.sh/{topic}",
                   data=msg.encode(),
                   headers={"Title": title})
 
 
 
 
-def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcodes=None, allow_run_stop=False):
+def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcodes=None, allow_run_stop=False, notify_channel="test1"):
     """
     Monitors the acquisition run and notifies when barcodes reach the target base count.
     """
@@ -84,8 +84,9 @@ def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcode
                     print(f"Barcode {barcode} has {current_bases} bases (Target: {target_bases})")
                 elif current_bases >= target_bases:
 
-                    print(
-                        f"\n*** NOTIFICATION: Barcode {barcode} has reached {current_bases} bases (Target: {target_bases}) ***\n")
+                    msg = f"Barcode {barcode} has reached {current_bases} bases (Target: {target_bases})"
+                    print(f"\n*** NOTIFICATION: {msg} ***\n")
+                    notify(msg, topic=notify_channel, title=f"Target Reached: {barcode}")
                     notified.add(barcode)
 
 
@@ -95,9 +96,9 @@ def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcode
             prot = connection.__getattribute__("protocol")
             if watch_barcodes and all(b in notified for b in watch_barcodes):
 
-                notify(f"All watched barcodes have reached the target. Finishing.",title="test1")
+                notify(f"All watched barcodes have reached the target. Finishing.", topic=notify_channel)
                 if allow_run_stop:
-                    notify(f"Run was stopped", title="test1")
+                    notify(f"Run was stopped", topic=notify_channel)
                     prot.stop_protocol()
                     break
 
@@ -118,6 +119,7 @@ def main():
     parser.add_argument("--barcodes", nargs='+', help="Specific barcodes to watch (if omitted, watches all)")
     parser.add_argument("--use-insecure", action="store_true", help="Use insecure connection")
     parser.add_argument("--allow-run-stop", action="store_true", help="Allow run stop")
+    parser.add_argument("--notify-channel", default="test1", help="ntfy.sh topic for notifications (default: test1)")
 
     args = parser.parse_args()
 
@@ -164,7 +166,7 @@ def main():
                 logger.error("No acquisition run is currently active on this position.")
                 return
 
-        monitor_barcodes(connection, run_id, args.target_bases, args.barcodes, args.allow_run_stop)
+        monitor_barcodes(connection, run_id, args.target_bases, args.barcodes, args.allow_run_stop, args.notify_channel)
 
     except Exception as e:
         logger.error(f"Failed to connect or monitor: {e}")
