@@ -1,0 +1,9 @@
+[project]
+name = "minknow-notifications-ngs"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "minknow-api==6.10.1",
+    "numpy>=2.5.1",
+    "requests>=2.34.2",
+]
