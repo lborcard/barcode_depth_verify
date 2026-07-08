@@ -20,15 +20,38 @@ logger = logging.getLogger(__name__)
 
 
 
-def notify(msg, topic="test1", title="MinKNOW Notification"):
-    requests.post(f"https://ntfy.sh/{topic}",
-                  data=msg.encode(),
-                  headers={"Title": title})
 
 
+def notify_via_ntfy(msg, topic, title="MinKNOW Notification"):
+    import requests
+    url = f"https://ntfy.sh/{topic}"
+    try:
+        requests.post(url,
+                      data=msg.encode(encoding='utf-8'),
+                      headers={"Title": title})
+    except Exception as e:
+        logger.error(f"Error sending ntfy notification: {e}")
 
 
-def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcodes=None, allow_run_stop=False, notify_channel="test1"):
+def notify_via_msmtp(msg, recipient, title="MinKNOW Notification",domain='smtp.unibe.ch'):
+    import subprocess
+    sender = "barcode-notify@unibe.ch"
+    email_content = f"From: {sender}\nSubject: {title}\nTo: {recipient}\n\n{msg}"
+    try:
+        subprocess.run(
+            ["msmtp", "--read-envelope-from", "--domain=smtp.unibe.ch", "-t"],
+            input=email_content.encode(),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(f"msmtp failed (exit code {e.returncode}): {e.stderr.decode()}")
+    except Exception as e:
+        logger.error(f"Error sending email via msmtp: {e}")
+
+
+def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcodes=None, allow_run_stop=False, notify_channel="test1", email_recipient=None, domain=None):
     """
     Monitors the acquisition run and notifies when barcodes reach the target base count.
     """
@@ -81,12 +104,18 @@ def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcode
                 current_bases = latest_snapshot.yield_summary.basecalled_pass_bases
                 if current_bases < target_bases:
                     stop_run = False
-                    print(f"Barcode {barcode} has {current_bases} bases (Target: {target_bases})")
+                    barcode_display = f"{domain}/{barcode}" if domain else barcode
+                    print(f"Barcode {barcode_display} has {current_bases} bases (Target: {target_bases})")
+                    msg = f"Barcode {barcode_display} has {current_bases} bases (Target: {target_bases})"
+                    if email_recipient:
+                        notify_via_msmtp(msg, recipient=email_recipient, title=f"Progress: {barcode_display}")
                 elif current_bases >= target_bases:
 
-                    msg = f"Barcode {barcode} has reached {current_bases} bases (Target: {target_bases})"
+                    barcode_display = f"{domain}/{barcode}" if domain else barcode
+                    msg = f"Barcode {barcode_display} has reached {current_bases} bases (Target: {target_bases})"
                     print(f"\n*** NOTIFICATION: {msg} ***\n")
-                    notify(msg, topic=notify_channel, title=f"Target Reached: {barcode}")
+                    if email_recipient:
+                        notify_via_msmtp(msg, recipient=email_recipient, title=f"Target Reached: {barcode_display}")
                     notified.add(barcode)
 
 
@@ -96,9 +125,13 @@ def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcode
             prot = connection.__getattribute__("protocol")
             if watch_barcodes and all(b in notified for b in watch_barcodes):
 
-                notify(f"All watched barcodes have reached the target. Finishing.", topic=notify_channel)
+                msg_finishing = "All watched barcodes have reached the target. Finishing."
+                if email_recipient:
+                    notify_via_msmtp(msg_finishing, recipient=email_recipient)
                 if allow_run_stop:
-                    notify(f"Run was stopped", topic=notify_channel)
+                    msg_stopped = "Run was stopped"
+                    if email_recipient:
+                        notify_via_msmtp(msg_stopped, recipient=email_recipient)
                     prot.stop_protocol()
                     break
 
@@ -120,6 +153,8 @@ def main():
     parser.add_argument("--use-insecure", action="store_true", help="Use insecure connection")
     parser.add_argument("--allow-run-stop", action="store_true", help="Allow run stop")
     parser.add_argument("--notify-channel", default="test1", help="ntfy.sh topic for notifications (default: test1)")
+    parser.add_argument("--email", help="Email address for notifications via msmtp")
+    parser.add_argument("--domain",default='smtp.unibe.ch', help="Domain to prepend to barcode names in notifications")
 
     args = parser.parse_args()
 
@@ -166,7 +201,7 @@ def main():
                 logger.error("No acquisition run is currently active on this position.")
                 return
 
-        monitor_barcodes(connection, run_id, args.target_bases, args.barcodes, args.allow_run_stop, args.notify_channel)
+        monitor_barcodes(connection, run_id, args.target_bases, args.barcodes, args.allow_run_stop, args.notify_channel, args.email, args.domain)
 
     except Exception as e:
         logger.error(f"Failed to connect or monitor: {e}")
