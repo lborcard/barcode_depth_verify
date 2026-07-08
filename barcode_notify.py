@@ -39,7 +39,7 @@ def notify_via_msmtp(msg, recipient, title="MinKNOW Notification",domain='smtp.u
     email_content = f"From: {sender}\nSubject: {title}\nTo: {recipient}\n\n{msg}"
     try:
         subprocess.run(
-            ["msmtp", "--read-envelope-from", "--domain=smtp.unibe.ch", "-t"],
+            ["msmtp", f"{sender}","--read-envelope-from", "--domain=smtp.unibe.ch", "-t"],
             input=email_content.encode(),
             check=True,
             stdout=subprocess.PIPE,
@@ -137,6 +137,7 @@ def monitor_barcodes(connection, acquisition_run_id, target_bases, watch_barcode
 
     except Exception as e:
         logger.error(f"Error during streaming: {e}")
+        notify_via_msmtp(f"Error during streaming: {e}", recipient=email_recipient)
     finally:
         logger.info("Monitoring stopped.")
 
